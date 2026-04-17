@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gacha Slot Simulator - HUD Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap');
+
+        body { 
+            background-color: #0b0f19; 
+            color: #e2e8f0; 
+            font-family: 'Rajdhani', sans-serif;
+            background-image: radial-gradient(circle at 50% 50%, #1a233a 0%, #0b0f19 100%);
+        }
+        
+        /* HUD風コンテナ */
+        .slot-container {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(59, 130, 246, 0.1);
+            transition: box-shadow 0.3s ease, border-color 0.3s ease;
+        }
+
+        /* レアリティ別発光エフェクト */
+        .glow-6 { border-color: #f59e0b; box-shadow: 0 0 50px rgba(245, 158, 11, 0.5), inset 0 0 30px rgba(245, 158, 11, 0.3); }
+        .glow-5 { border-color: #a855f7; box-shadow: 0 0 50px rgba(168, 85, 247, 0.5), inset 0 0 30px rgba(168, 85, 247, 0.3); }
+
+        canvas {
+            background-color: #020617;
+            border-radius: 4px;
+            box-shadow: inset 0 0 30px rgba(0,0,0,1);
+            border: 1px solid #1e293b;
+        }
+
+        /* 判定ライン */
+        .payline {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.8), transparent);
+            transform: translateY(-50%);
+            z-index: 10;
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+        }
+
+        /* サイバー風ボタン */
+        .btn-cyber {
+            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+            border: 1px solid #60a5fa;
+            box-shadow: 0 0 15px rgba(37, 99, 235, 0.5);
+            text-shadow: 0 0 5px rgba(255,255,255,0.5);
+            transition: all 0.1s;
+        }
+        .btn-cyber:active:not(:disabled) {
+            transform: scale(0.98);
+            box-shadow: 0 0 5px rgba(37, 99, 235, 0.8);
+        }
+        .btn-cyber:disabled {
+            background: #1e293b;
+            border-color: #334155;
+            color: #64748b;
+            box-shadow: none;
+            text-shadow: none;
+            cursor: not-allowed;
+        }
+
+        /* プログレスバー */
+        .progress-bg { background: #0f172a; border: 1px solid #334155; }
+        .progress-bar { transition: width 0.3s ease; }
+        .pulse-red { animation: pulse 1s infinite alternate; }
+        
+        @keyframes pulse {
+            from { opacity: 0.8; box-shadow: 0 0 5px #ef4444; }
+            to { opacity: 1; box-shadow: 0 0 15px #ef4444; }
+        }
+
+        /* 履歴アイコン */
+        .history-icon {
+            border-radius: 4px;
+            background-color: #1e293b;
+        }
+
+        /* フラッシュエフェクト */
+        .flash-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #f59e0b;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0;
+            mix-blend-mode: screen;
+        }
+
+        .flash-animation {
+            animation: flash 0.8s ease-out;
+        }
+
+        @keyframes flash {
+            0% { opacity: 0; }
+            10% { opacity: 0.8; }
+            100% { opacity: 0; }
+        }
+
+        /* リザルトアニメーション用 */
+        .anim-zoom-in {
+            animation: zoomIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        .anim-suck-in {
+            animation: suckIn 0.4s ease-in forwards;
+        }
+
+        @keyframes zoomIn {
+            0% { transform: scale(0.1); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes suckIn {
+            0% { transform: scale(1) translateY(0); opacity: 1; }
+            100% { transform: scale(0.1) translateY(40vh); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+    <div id="flashOverlay" class="flash-overlay"></div>
+
+    <!-- リザルト演出用オーバーレイ -->
+    <div id="resultOverlay" class="fixed inset-0 pointer-events-none flex items-center justify-center z-50 opacity-0 transition-opacity duration-300">
+        <div id="resultIcon" class="w-48 h-48 border-4 rounded-lg bg-slate-900 overflow-hidden flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+            <img id="resultImage" src="" class="w-full h-full object-cover hidden">
+            <div id="resultText" class="text-white font-bold text-3xl hidden"></div>
+        </div>
+    </div>
+
+    <div id="mainContainer" class="slot-container rounded-xl p-6 max-w-4xl w-full">
+        
+        <!-- ヘッダー HUD -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <!-- 実行回数 -->
+            <div class="bg-slate-900 p-3 rounded border border-slate-700 flex flex-col justify-center items-center">
+                <div class="text-slate-400 text-sm uppercase tracking-widest">Total Scans</div>
+                <div class="text-3xl font-bold text-blue-400 font-mono" id="totalPullsDisplay">0</div>
+            </div>
+
+            <!-- ★6 ピティ -->
+            <div class="bg-slate-900 p-3 rounded border border-slate-700 flex flex-col justify-center">
+                <div class="flex justify-between items-end mb-1">
+                    <div class="text-yellow-500 text-sm font-bold tracking-wider">★6 PROBABILITY</div>
+                    <div class="text-yellow-400 font-mono text-sm"><span id="pity6Text">0</span> / 65+</div>
+                </div>
+                <div class="progress-bg h-2 rounded-full w-full overflow-hidden">
+                    <div id="pity6Bar" class="progress-bar h-full bg-yellow-500 w-0"></div>
+                </div>
+            </div>
+
+            <!-- ★5 ピティ -->
+            <div class="bg-slate-900 p-3 rounded border border-slate-700 flex flex-col justify-center">
+                <div class="flex justify-between items-end mb-1">
+                    <div class="text-purple-400 text-sm font-bold tracking-wider">★5 GUARANTEE</div>
+                    <div class="text-purple-300 font-mono text-sm"><span id="pity5Text">0</span> / 10</div>
+                </div>
+                <div class="progress-bg h-2 rounded-full w-full overflow-hidden">
+                    <div id="pity5Bar" class="progress-bar h-full bg-purple-500 w-0"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- リールエリア -->
+        <div class="relative mb-6 flex justify-center">
+            <canvas id="slotCanvas" width="600" height="240"></canvas>
+            <div class="payline"></div>
+        </div>
+
+        <!-- 操作ボタン -->
+        <div class="flex justify-center gap-6 mb-6">
+            <button id="btnStart" class="btn-cyber text-white font-bold py-4 px-16 rounded tracking-widest text-2xl uppercase">
+                Initialize Scan
+            </button>
+        </div>
+
+        <!-- 履歴エリア -->
+        <div class="bg-slate-900 p-3 rounded h-48 overflow-y-auto border border-slate-800 w-full" id="historyArea">
+            <div id="historyGrid" class="grid grid-cols-10 gap-2"></div>
+        </div>
+    </div>
+
+<script>
+/**
+ * キャラクター定義
+ */
+const CHARACTERS = {
+    'zoan': { id: 'zoan', name: 'ゾアン', img: 'ゾアン.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'rossi': { id: 'rossi', name: 'ロッシ', img: 'ロッシ.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'tangtang': { id: 'tangtang', name: 'タンタン', img: 'タンタン.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'arderia': { id: 'arderia', name: 'アルデリア', img: 'アルデリア.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'ember': { id: 'ember', name: 'エンバー', img: 'エンバー.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'pogranichnik': { id: 'pogranichnik', name: 'ポグラニチニク', img: 'ポグラニチニク.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'lastlight': { id: 'lastlight', name: 'ラストライト', img: 'ラストライト.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'lifeng': { id: 'lifeng', name: 'リーフォン', img: 'リーフォン.png', rarity: 6, color: '#f59e0b', textColor: '#fff' },
+    'perlica': { id: 'perlica', name: 'ペリカ', img: 'ペリカ.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'chen': { id: 'chen', name: 'チェン', img: 'チェン.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'aresh': { id: 'aresh', name: 'アレッシュ', img: 'アレッシュ.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'arclight': { id: 'arclight', name: 'アークライト', img: 'アークライト.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'xih': { id: 'xih', name: 'ザイヒ', img: 'ザイヒ.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'wolfguard': { id: 'wolfguard', name: 'ウルフガード', img: 'ウルフガード.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'dapan': { id: 'dapan', name: 'ダパン', img: 'ダパン.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'snowshine': { id: 'snowshine', name: 'スノーシャイン', img: 'スノーシャイン.png', rarity: 5, color: '#a855f7', textColor: '#fff' },
+    'z7': { id: 'z7', name: 'Z7', img: 'Z7.png', rarity: 4, color: '#3b82f6', textColor: '#fff' }
+};
+
+const POOL_6 = ['zoan', 'rossi', 'tangtang', 'arderia', 'ember', 'pogranichnik', 'lastlight', 'lifeng'];
+const POOL_5 = ['perlica', 'chen', 'aresh', 'arclight', 'xih', 'wolfguard', 'dapan', 'snowshine'];
+const POOL_4 = ['z7'];
+
+// 画像の読み込み
+const images = {};
+Object.keys(CHARACTERS).forEach(key => {
+    const char = CHARACTERS[key];
+    if (char.img) {
+        const img = new Image();
+        img.src = './' + encodeURI(char.img);
+        img.loaded = false;
+        img.onload = () => { img.loaded = true; };
+        img.onerror = () => { img.loaded = false; };
+        images[key] = img;
+    }
+});
+
+/**
+ * リール配列の生成
+ */
+const REEL_LENGTH = 30;
+function generateReelBand() {
+    const band = [];
+    const allKeys = Object.keys(CHARACTERS);
+    for (let i = 0; i < REEL_LENGTH; i++) {
+        band.push(allKeys[Math.floor(Math.random() * allKeys.length)]);
+    }
+    return band;
+}
+const REEL_BANDS = [generateReelBand(), generateReelBand(), generateReelBand()];
+
+/**
+ * 状態管理
+ */
+let totalPulls = 0;
+let pity6Counter = 0;
+let pity5Counter = 0;
+let isSpinning = false;
+
+const reels = [
+    { pos: 0, speed: 0, targetPos: null, state: 'idle', resultSymbol: null },
+    { pos: 0, speed: 0, targetPos: null, state: 'idle', resultSymbol: null },
+    { pos: 0, speed: 0, targetPos: null, state: 'idle', resultSymbol: null }
+];
+const SPIN_SPEED = 0.8;
+
+// DOM Elements
+const uiTotal = document.getElementById('totalPullsDisplay');
+const uiPity6Text = document.getElementById('pity6Text');
+const uiPity6Bar = document.getElementById('pity6Bar');
+const uiPity5Text = document.getElementById('pity5Text');
+const uiPity5Bar = document.getElementById('pity5Bar');
+const btnStart = document.getElementById('btnStart');
+const uiHistory = document.getElementById('historyArea');
+const historyGrid = document.getElementById('historyGrid');
+const mainContainer = document.getElementById('mainContainer');
+const canvas = document.getElementById('slotCanvas');
+const ctx = canvas.getContext('2d');
+const REEL_WIDTH = canvas.width / 3;
+const SYMBOL_HEIGHT = canvas.height / 3;
+
+function updateUI() {
+    uiTotal.innerText = totalPulls;
+    
+    // ★6 ゲージ更新
+    uiPity6Text.innerText = pity6Counter;
+    let p6Ratio = Math.min((pity6Counter / 65) * 100, 100);
+    uiPity6Bar.style.width = `${p6Ratio}%`;
+    
+    if (pity6Counter > 65) {
+        uiPity6Bar.classList.replace('bg-yellow-500', 'bg-red-500');
+        uiPity6Bar.classList.add('pulse-red');
+    } else {
+        uiPity6Bar.classList.replace('bg-red-500', 'bg-yellow-500');
+        uiPity6Bar.classList.remove('pulse-red');
+    }
+
+    // ★5 ゲージ更新
+    uiPity5Text.innerText = pity5Counter;
+    let p5Ratio = (pity5Counter / 10) * 100;
+    uiPity5Bar.style.width = `${p5Ratio}%`;
+}
+
+function addHistoryIcon(charObj) {
+    const el = document.createElement('div');
+    el.className = 'history-icon flex items-center justify-center overflow-hidden text-xs font-bold w-full aspect-square';
+    el.style.borderColor = charObj.color;
+    el.style.borderWidth = '2px';
+
+    if (images[charObj.id] && images[charObj.id].loaded) {
+        const img = document.createElement('img');
+        img.src = images[charObj.id].src;
+        img.className = 'w-full h-full object-cover';
+        el.appendChild(img);
+    } else {
+        el.style.backgroundColor = '#1e293b';
+        el.style.color = charObj.textColor;
+        el.innerText = charObj.name.substring(0, 2);
+    }
+    historyGrid.insertBefore(el, historyGrid.firstChild);
+}
+
+/**
+ * 抽選ロジック
+ */
+function drawGacha() {
+    totalPulls++;
+    pity6Counter++;
+    pity5Counter++;
+
+    let prob6 = 0.008;
+    if (pity6Counter > 65) prob6 += (pity6Counter - 65) * 0.02;
+
+    const rand = Math.random();
+    let rarity = 4;
+
+    if (rand < prob6) {
+        rarity = 6;
+        pity6Counter = 0;
+        pity5Counter = 0;
+    } else if (pity5Counter >= 10) {
+        rarity = 5;
+        pity5Counter = 0;
+    } else if (rand < prob6 + 0.08) {
+        rarity = 5;
+        pity5Counter = 0;
+    }
+
+    let resultCharId = '';
+    if (rarity === 6) {
+        resultCharId = Math.random() < 0.5 ? 'zoan' : POOL_6.filter(id => id !== 'zoan')[Math.floor(Math.random() * (POOL_6.length - 1))];
+    } else if (rarity === 5) {
+        resultCharId = POOL_5[Math.floor(Math.random() * POOL_5.length)];
+    } else {
+        resultCharId = POOL_4[Math.floor(Math.random() * POOL_4.length)];
+    }
+
+    return CHARACTERS[resultCharId];
+}
+
+btnStart.addEventListener('click', () => {
+    if (isSpinning) return;
+    isSpinning = true;
+    btnStart.disabled = true;
+    
+    // エフェクトリセット
+    mainContainer.className = 'slot-container rounded-xl p-6 max-w-4xl w-full';
+
+    const result = drawGacha();
+    // カウンタのUI更新はアニメーション完了後に遅延させるため削除
+
+    // 停止絵柄の決定
+    let reelTargets = [];
+    if (result.rarity >= 5) {
+        // ★5以上は揃える
+        reelTargets = [result.id, result.id, result.id];
+    } else {
+        // ★4以下は揃えない（ハズレ目）
+        if (Math.random() < 0.3) {
+            // 30%の確率でフェイクリーチ（左・中が同じで右が異なる）
+            const highRarityPool = [...POOL_6, ...POOL_5];
+            const fakeCharId = highRarityPool[Math.floor(Math.random() * highRarityPool.length)];
+            let thirdCharId = '';
+            const allKeys = Object.keys(CHARACTERS);
+            do {
+                thirdCharId = allKeys[Math.floor(Math.random() * allKeys.length)];
+            } while (thirdCharId === fakeCharId);
+            reelTargets = [fakeCharId, fakeCharId, thirdCharId];
+        } else {
+            // バラケ目
+            let c1, c2, c3;
+            const allKeys = Object.keys(CHARACTERS);
+            c1 = allKeys[Math.floor(Math.random() * allKeys.length)];
+            do { c2 = allKeys[Math.floor(Math.random() * allKeys.length)]; } while (c1 === c2);
+            do { c3 = allKeys[Math.floor(Math.random() * allKeys.length)]; } while (c3 === c1 || c3 === c2);
+            reelTargets = [c1, c2, c3];
+        }
+    }
+
+    reels.forEach((r, i) => {
+        r.state = 'spinning';
+        r.speed = SPIN_SPEED;
+        r.resultSymbol = result.id; // 内部的な獲得結果
+        
+        const targetSymbolId = reelTargets[i]; // 見た目上の停止絵柄
+        
+        const targetIndex = Math.floor(Math.random() * REEL_LENGTH);
+        REEL_BANDS[i][targetIndex] = targetSymbolId;
+        r.targetPos = targetIndex;
+    });
+
+    setTimeout(() => { reels[0].state = 'stopping'; }, 1000);
+    setTimeout(() => { reels[1].state = 'stopping'; }, 1600);
+    setTimeout(() => { reels[2].state = 'stopping'; }, 2200);
+});
+
+/**
+ * 描画
+ */
+function drawSymbol(ctx, charObj, x, y, width, height, isBlur) {
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(x, y, width, height);
+    
+    ctx.strokeStyle = charObj.color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 2, y + 2, width - 4, height - 4);
+
+    const img = images[charObj.id];
+
+    // モーションブラー処理
+    const drawPasses = isBlur ? 3 : 1;
+    const blurOffset = isBlur ? 15 : 0;
+    
+    ctx.globalAlpha = isBlur ? 0.33 : 1.0;
+
+    for (let i = 0; i < drawPasses; i++) {
+        let offsetY = y + (i - Math.floor(drawPasses/2)) * blurOffset;
+
+        if (img && img.loaded) {
+            const padding = 10;
+            const imgAspect = img.width / img.height;
+            const boxAspect = (width - padding*2) / (height - padding*2);
+            let drawW, drawH;
+
+            if (imgAspect > boxAspect) {
+                drawW = width - padding*2;
+                drawH = drawW / imgAspect;
+            } else {
+                drawH = height - padding*2;
+                drawW = drawH * imgAspect;
+            }
+            const drawX = x + (width - drawW) / 2;
+            const drawY = offsetY + (height - drawH) / 2;
+
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        } else {
+            ctx.fillStyle = charObj.textColor;
+            ctx.font = 'bold 20px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(charObj.name.substring(0,4), x + width/2, offsetY + height/2);
+        }
+    }
+    ctx.globalAlpha = 1.0;
+}
+
+function updateAndDraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let allHalted = true;
+
+    reels.forEach((r, i) => {
+        let isBlur = false;
+
+        if (r.state === 'spinning' || r.state === 'stopping') {
+            allHalted = false;
+            isBlur = true; // 回転中はブラー有効
+            
+            if (r.state === 'stopping') {
+                let diff = r.targetPos - r.pos;
+                if (diff < 0) diff += REEL_LENGTH;
+
+                if (diff <= r.speed) {
+                    r.pos = r.targetPos;
+                    r.state = 'idle';
+                    isBlur = false; // 停止時はブラー解除
+                } else {
+                    r.pos = (r.pos + r.speed) % REEL_LENGTH;
+                }
+            } else {
+                r.pos = (r.pos + r.speed) % REEL_LENGTH;
+            }
+        }
+
+        const baseX = i * REEL_WIDTH;
+        const offsetIdx = Math.floor(r.pos);
+        const shiftY = (r.pos - offsetIdx) * SYMBOL_HEIGHT;
+
+        for (let row = -1; row <= 2; row++) {
+            let symbolIdx = (offsetIdx - 1 + row + REEL_LENGTH) % REEL_LENGTH;
+            const symbolId = REEL_BANDS[i][symbolIdx];
+            const charObj = CHARACTERS[symbolId];
+            const y = row * SYMBOL_HEIGHT - shiftY;
+            drawSymbol(ctx, charObj, baseX, y, REEL_WIDTH, SYMBOL_HEIGHT, isBlur);
+        }
+        
+        if (i > 0) {
+            ctx.beginPath();
+            ctx.moveTo(baseX, 0);
+            ctx.lineTo(baseX, canvas.height);
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+        }
+    });
+
+    if (isSpinning && allHalted) {
+        isSpinning = false;
+        // btnStart.disabled の解除もアニメーション完了後に遅延させるため削除
+        
+        const resultChar = CHARACTERS[reels[0].resultSymbol];
+        
+        // 演出付与
+        if (resultChar.rarity === 6) {
+            mainContainer.classList.add('glow-6');
+            
+            // 画面フラッシュ演出
+            const flash = document.getElementById('flashOverlay');
+            flash.classList.remove('flash-animation');
+            void flash.offsetWidth; // アニメーション再トリガー
+            flash.classList.add('flash-animation');
+        } else if (resultChar.rarity === 5) {
+            mainContainer.classList.add('glow-5');
+        }
+
+        // リザルトアニメーションの実行
+        playResultAnimation(resultChar);
+    }
+
+    requestAnimationFrame(updateAndDraw);
+}
+
+function playResultAnimation(charObj) {
+    const overlay = document.getElementById('resultOverlay');
+    const iconContainer = document.getElementById('resultIcon');
+    const imgEl = document.getElementById('resultImage');
+    const textEl = document.getElementById('resultText');
+
+    // レアリティカラーの反映
+    iconContainer.style.borderColor = charObj.color;
+    if (charObj.rarity >= 5) {
+        iconContainer.style.boxShadow = `0 0 50px ${charObj.color}80`;
+    } else {
+        iconContainer.style.boxShadow = '0 0 30px rgba(0,0,0,0.8)';
+    }
+    
+    // 画像または代替テキストの設定
+    if (images[charObj.id] && images[charObj.id].loaded) {
+        imgEl.src = images[charObj.id].src;
+        imgEl.classList.remove('hidden');
+        textEl.classList.add('hidden');
+    } else {
+        imgEl.classList.add('hidden');
+        textEl.style.color = charObj.textColor;
+        textEl.innerText = charObj.name.substring(0, 4);
+        textEl.classList.remove('hidden');
+    }
+
+    // 表示開始（ズームイン）
+    overlay.classList.remove('opacity-0');
+    iconContainer.classList.remove('anim-zoom-in', 'anim-suck-in');
+    
+    void iconContainer.offsetWidth; // リフロー強制
+    iconContainer.classList.add('anim-zoom-in');
+
+    // 1秒間中央に表示後、吸い込みアニメーション開始
+    setTimeout(() => {
+        iconContainer.classList.remove('anim-zoom-in');
+        iconContainer.classList.add('anim-suck-in');
+        
+        // 吸い込みアニメーション完了時の処理
+        iconContainer.addEventListener('animationend', function handler(e) {
+            if (e.animationName === 'suckIn') {
+                iconContainer.removeEventListener('animationend', handler);
+                overlay.classList.add('opacity-0');
+                
+                // アニメーション完了時に履歴追加、UI更新、ボタン有効化
+                addHistoryIcon(charObj);
+                updateUI();
+                btnStart.disabled = false;
+            }
+        });
+    }, 1000); 
+}
+
+updateAndDraw();
+</script>
+</body>
+</html>
